@@ -1,0 +1,16 @@
+{% extends 'base.html' %}{% block content %}
+<section class="cards">
+  <div class="card hero"><span>Total Assets</span><strong>{{ asset_total }}</strong></div>
+  <div class="card"><span>Employees</span><strong>{{ employee_total }}</strong></div>
+  <div class="card"><span>Approved / Pending Assets</span><strong>{{ approved }} / {{ pending }}</strong></div>
+  <div class="card"><span>Total / Active Users</span><strong>{{ total_users }} / {{ active_users }}</strong></div>
+  <div class="card"><span>Total Software</span><strong>{{ software_total }}</strong></div>
+</section>
+<section class="grid-2">
+  <div class="panel"><h2>Segregated Asset Counts</h2><div class="chips">{% for name, count in counts.items() %}<span>{{ name }} <b>{{ count }}</b></span>{% endfor %}</div></div>
+  <div class="panel"><h2>Software Counts</h2><div class="table-wrap"><table><thead><tr><th>Software</th><th>Used</th><th>Free</th></tr></thead><tbody>{% for s in software %}<tr><td>{{ s.software_name }}</td><td>{{ s.used_count }}</td><td>{{ s.free_count }}</td></tr>{% else %}<tr><td colspan="3">No software yet.</td></tr>{% endfor %}</tbody></table></div></div>
+</section>
+<section class="panel"><h2>Unapproved Assets with Count</h2><div class="chips">{% for row in unapproved %}<span>{{ row.asset_type or 'Unknown' }} <b>{{ row.c }}</b></span>{% else %}<span>No pending assets</span>{% endfor %}</div></section>
+<section class="grid-2"><div class="panel"><h2>Recent Audit Logs (Top 200)</h2><div class="table-wrap small"><table><thead><tr><th>Date</th><th>Actor</th><th>Action</th><th>Table</th><th>Details</th></tr></thead><tbody>{% for l in logs %}<tr><td>{{ l.created_at }}</td><td>{{ l.actor }}</td><td>{{ l.action }}</td><td>{{ l.table_name }}</td><td>{{ l.details }}</td></tr>{% endfor %}</tbody></table></div></div><div class="panel"><h2>User Login History</h2><div class="table-wrap small"><table><thead><tr><th>Date</th><th>User</th><th>IP</th><th>Status</th></tr></thead><tbody>{% for l in logins %}<tr><td>{{ l.created_at }}</td><td>{{ l.username }}</td><td>{{ l.ip }}</td><td>{{ l.status }}</td></tr>{% endfor %}</tbody></table></div></div></section>
+{% endblock %}
+

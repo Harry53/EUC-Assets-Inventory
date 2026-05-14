@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{ title or 'EUC Assets Inventory' }}</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body>
+  <aside class="sidebar">
+    <div class="brand">EUC<span>Inventory</span></div>
+    {% if user %}
+    <nav>
+      <a href="{{ url_for('dashboard') }}">Dashboard</a>
+      <div class="nav-title">Inventory</div>
+      <a href="{{ url_for('inventory', kind='assets') }}">Assets Inventory</a>
+      <a href="{{ url_for('inventory', kind='software') }}">Licensed Software</a>
+      <a href="{{ url_for('inventory', kind='employees') }}">Employees</a>
+      <a href="{{ url_for('inventory', kind='unprocessed-assets') }}">Unprocessed Assets</a>
+      <a href="{{ url_for('inventory', kind='unprocessed-software') }}">Unprocessed Software</a>
+      <a href="{{ url_for('inventory', kind='unprocessed-employees') }}">Unprocessed Employees</a>
+      <div class="nav-title">Reports</div>
+      <a href="{{ url_for('report', name='inventory') }}">Inventory Report</a>
+      <a href="{{ url_for('report', name='software') }}">Software Report</a>
+      <a href="{{ url_for('report', name='allotted') }}">Allotted Assets</a>
+      <a href="{{ url_for('report', name='unallocated') }}">Unallocated Assets</a>
+      {% if user.role == 'Admin' %}<div class="nav-title">Administration</div><a href="{{ url_for('admin') }}">User Control</a>{% endif %}
+      <a href="{{ url_for('logout') }}">Logout</a>
+    </nav>
+    {% endif %}
+  </aside>
+  <main class="content">
+    <header class="topbar">
+      <button id="menuToggle">☰</button>
+      <h1>{{ title or 'EUC Assets Inventory' }}</h1>
+      {% if user %}<div class="user-pill">{{ user.username }} · {{ user.role }}</div>{% endif %}
+    </header>
+    {% with messages = get_flashed_messages(with_categories=true) %}{% if messages %}<section class="flash-wrap">{% for category, message in messages %}<div class="flash {{ category }}">{{ message }}</div>{% endfor %}</section>{% endif %}{% endwith %}
+    {% block content %}{% endblock %}
+  </main>
+  <div id="historyModal" class="modal"><div class="modal-card"><button class="modal-close">×</button><h3>History</h3><pre id="historyText"></pre></div></div>
+  <script src="{{ url_for('static', filename='js/app.js') }}"></script>
+</body>
+</html>
+
