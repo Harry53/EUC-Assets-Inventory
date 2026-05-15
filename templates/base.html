@@ -1,45 +1,17 @@
 <!doctype html>
-<html lang="en">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>{{ title or 'EUC Assets Inventory' }}</title>
-  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
-</head>
+<html lang="en" data-theme="{{ user.theme if user and user.theme else 'dark' }}">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>{{ title or 'EUC Assets Inventory' }}</title><link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}"></head>
 <body>
-  <aside class="sidebar">
-    <div class="brand">EUC<span>Inventory</span></div>
-    {% if user %}
-    <nav>
-      <a href="{{ url_for('dashboard') }}">Dashboard</a>
-      <div class="nav-title">Inventory</div>
-      <a href="{{ url_for('inventory', kind='assets') }}">Assets Inventory</a>
-      <a href="{{ url_for('inventory', kind='software') }}">Licensed Software</a>
-      <a href="{{ url_for('inventory', kind='employees') }}">Employees</a>
-      <a href="{{ url_for('inventory', kind='unprocessed-assets') }}">Unprocessed Assets</a>
-      <a href="{{ url_for('inventory', kind='unprocessed-software') }}">Unprocessed Software</a>
-      <a href="{{ url_for('inventory', kind='unprocessed-employees') }}">Unprocessed Employees</a>
-      <div class="nav-title">Reports</div>
-      <a href="{{ url_for('report', name='inventory') }}">Inventory Report</a>
-      <a href="{{ url_for('report', name='software') }}">Software Report</a>
-      <a href="{{ url_for('report', name='allotted') }}">Allotted Assets</a>
-      <a href="{{ url_for('report', name='unallocated') }}">Unallocated Assets</a>
-      {% if user.role == 'Admin' %}<div class="nav-title">Administration</div><a href="{{ url_for('admin') }}">User Control</a>{% endif %}
-      <a href="{{ url_for('logout') }}">Logout</a>
-    </nav>
-    {% endif %}
-  </aside>
-  <main class="content">
-    <header class="topbar">
-      <button id="menuToggle">☰</button>
-      <h1>{{ title or 'EUC Assets Inventory' }}</h1>
-      {% if user %}<div class="user-pill">{{ user.username }} · {{ user.role }}</div>{% endif %}
-    </header>
-    {% with messages = get_flashed_messages(with_categories=true) %}{% if messages %}<section class="flash-wrap">{% for category, message in messages %}<div class="flash {{ category }}">{{ message }}</div>{% endfor %}</section>{% endif %}{% endwith %}
-    {% block content %}{% endblock %}
-  </main>
-  <div id="historyModal" class="modal"><div class="modal-card"><button class="modal-close">×</button><h3>History</h3><pre id="historyText"></pre></div></div>
-  <script src="{{ url_for('static', filename='js/app.js') }}"></script>
-</body>
-</html>
-
+  <aside class="sidebar"><div class="brand"><span class="logo">▣</span><div>EUC<span>Inventory Suite</span></div></div>{% if user %}<nav class="nav">
+    <a href="{{ url_for('dashboard') }}">📊 <span>Dashboard</span></a><div class="nav-title">Inventory</div>
+    <a href="{{ url_for('inventory', kind='assets') }}">💻 <span>Assets Inventory</span></a><a href="{{ url_for('inventory', kind='software') }}">🧾 <span>Licensed Software</span></a><a href="{{ url_for('inventory', kind='employees') }}">👥 <span>Employees</span></a><a href="{{ url_for('vendors') }}">🏢 <span>Vendor Management</span></a>
+    <a href="{{ url_for('inventory', kind='unprocessed-assets') }}">⏳ <span>Unprocessed Assets</span></a><a href="{{ url_for('inventory', kind='unprocessed-software') }}">🔐 <span>Unprocessed Software</span></a><a href="{{ url_for('inventory', kind='unprocessed-employees') }}">🧑‍💼 <span>Unprocessed Employees</span></a>
+    <div class="nav-title">Asset Allotment</div><a href="{{ url_for('asset_allotment_type', ctype='joining') }}">🟢 <span>Joining Checklist</span></a><a href="{{ url_for('asset_allotment_type', ctype='replacement') }}">🔁 <span>Replacement Checklist</span></a><a href="{{ url_for('asset_allotment_type', ctype='rebuild') }}">🛠️ <span>Rebuild Checklist</span></a><a href="{{ url_for('asset_allotment_type', ctype='exit') }}">🚪 <span>Exit Checklist</span></a><a href="{{ url_for('asset_allotment_type', ctype='sysadmin') }}">🧑‍💻 <span>Sysadmin Tasks</span></a><a href="{{ url_for('asset_allotment_type', ctype='machine-preparation') }}">🏗️ <span>Machine Preparation</span></a>
+    <div class="nav-title">Sophos</div><a href="{{ url_for('sophos') }}">🛡️ <span>Sophos Task</span></a>
+    <div class="nav-title">Reports</div><a href="{{ url_for('report', name='inventory') }}">📦 <span>Inventory Report</span></a><a href="{{ url_for('report', name='software') }}">📄 <span>Software Report</span></a><a href="{{ url_for('report', name='allotted') }}">🤝 <span>Allotted Assets</span></a><a href="{{ url_for('report', name='unallocated') }}">📭 <span>Unallocated Assets</span></a><a href="{{ url_for('sophos_report') }}">🛡️ <span>Sophos Report</span></a>
+    {% if user.role in ['Super Admin','Admin'] %}<div class="nav-title">Administration</div><a href="{{ url_for('admin') }}">🛡️ <span>User Control</span></a><a href="{{ url_for('admin_logs') }}">🪵 <span>Logs</span></a><a href="{{ url_for('admin_db') }}">🗄️ <span>DB Administration</span></a><a href="{{ url_for('admin_email') }}">✉️ <span>Email Server</span></a><a href="{{ url_for('admin_notifications') }}">🔔 <span>Notification Config</span></a>{% endif %}
+  </nav>{% endif %}</aside>
+  <main class="content"><header class="topbar"><button id="menuToggle" class="icon-btn">☰</button><div class="title-block"><p class="eyebrow">Administration Console</p><h1>{{ title or 'EUC Assets Inventory' }}</h1></div>{% if user %}<div class="top-actions"><button id="themeToggle" class="icon-btn" title="Toggle theme">🌓</button><div class="notifications"><button class="icon-btn" data-toggle="notificationPanel">🔔 <b>{{ unread_notifications|length }}</b></button><section id="notificationPanel" class="notification-panel hidden"><div class="panel-head"><h3>Notifications</h3><form method="post" action="{{ url_for('read_notifications') }}"><button class="btn-sm">Mark read</button></form></div>{% for note in unread_notifications %}<article><strong>{{ note.type }}</strong><p>{{ note.message }}</p><small>{{ note.created_at }}</small></article>{% else %}<p class="muted">No unread notifications.</p>{% endfor %}</section></div><a class="user-pill" href="{{ url_for('profile') }}">👤 {{ user.username }} · {{ user.role }}</a><a class="logout" href="{{ url_for('logout') }}">🚪 Logout</a></div>{% endif %}</header>
+    {% with messages = get_flashed_messages(with_categories=true) %}{% if messages %}<section class="flash-wrap">{% for category, message in messages %}<div class="flash {{ category }}">{{ message }}</div>{% endfor %}</section>{% endif %}{% endwith %}{% block content %}{% endblock %}
+  </main><div id="historyModal" class="modal"><div class="modal-card"><button class="modal-close">×</button><h3>History / Details</h3><pre id="historyText"></pre></div></div><script src="{{ url_for('static', filename='js/app.js') }}"></script>
+</body></html>

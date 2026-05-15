@@ -1,3 +1,10 @@
+__pycache__/
+*.py[cod]
+.venv/
+inventory.db
+logs/*.log
+backups/
+uploads/
 # Python cache
 __pycache__/
 *.py[cod]
