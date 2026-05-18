@@ -21,7 +21,7 @@ BASE_DIR = Path(__file__).resolve().parent
 DB_PATH = BASE_DIR / "inventory.db"
 LOG_PATH = BASE_DIR / "logs" / "activity.log"
 ASSET_TYPES = ["Laptop", "Desktop", "Workstation", "Monitor", "G-Drive", "G-Raid"]
-ROLES = ("Super Admin", "Admin", "Editor", "Viewer", "Sysadmin", "Engineer", "Approver")
+ROLES = ("Super Admin", "Admin", "Asset Manager", "Editor", "Viewer")
 
 app = Flask(__name__)
 app.config["SECRET_KEY"] = os.environ.get("SECRET_KEY", "dev-change-me")
@@ -53,7 +53,7 @@ NOTIFICATION_TYPES = ["Expiry Alerts", "Assets Approval", "Change", "Asset Remov
 DATE_FIELDS = {"doj", "eol", "purchase_date", "installation_date", "expiry_date", "last_updated_date", "email_created_on", "date_of_exit", "form_submission_date", "apply_date", "will_revoke_date", "revoke_date"}
 SOPHOS_MACHINE_COLUMNS = ["asset_tag", "hostname", "username", "ticket_id", "group_name", "application_control", "data_loss_prevention", "windows_firewall", "peripheral_control", "threat_protection", "update_management", "web_control", "status", "comment"]
 SOPHOS_REQUEST_COLUMNS = ["request_type", "old_hostname", "new_hostname", "hostname", "requester_name", "approver", "engineer", "policy_changed_by", "apply_date", "policy", "ticket_id", "group_name", "duration", "current_status", "will_revoke_date", "day_left_for_revoke", "revoke_date", "access_comment", "revoke_comment", "reason", "payload", "approval_status"]
-FEATURES = ["Dashboard", "Inventory", "Asset Allotment", "Sophos Task", "Reports", "Administration", "Approvals", "DB Administration", "Email Server"]
+FEATURES: list[str] = []
 
 SAMPLE_MAP = {
     "sophos-machine-preparation": SOPHOS_REQUEST_COLUMNS,
@@ -134,8 +134,12 @@ def init_db() -> None:
     conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_assets_serial ON assets(serial_number) WHERE serial_number IS NOT NULL AND serial_number != ''")
     conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_employees_ecode ON employees(e_code)")
     conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_software_key ON software(license_key) WHERE license_key IS NOT NULL AND license_key != ''")
+    conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_software_name ON software(software_name) WHERE software_name IS NOT NULL AND software_name != ''")
+    conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_vendors_name ON vendors(vendor_name) WHERE vendor_name IS NOT NULL AND vendor_name != ''")
     conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_assignment_device_license ON software_assignments(desktop_laptop_tag, license_key)")
     ensure_columns(conn)
+    valid_roles = tuple(ROLES)
+    conn.execute(f"UPDATE users SET role='Editor' WHERE role NOT IN ({','.join('?' for _ in valid_roles)})", valid_roles)
     if not conn.execute("SELECT 1 FROM users WHERE username='admin'").fetchone():
         conn.execute("INSERT INTO users (username,password_hash,role,status,disabled,created_at) VALUES (?,?,?,?,?,?)",
                      ("admin", generate_password_hash("admin123"), "Admin", "Active", 0, now()))
@@ -160,6 +164,18 @@ def ensure_columns(conn: sqlite3.Connection) -> None:
 
 def now() -> str:
     return datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
+
+
+def display_date(value: Any) -> str:
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d", "%d-%m-%y"):
+        try:
+            return datetime.strptime(text[:19] if fmt.endswith("%S") else text[:10], fmt).strftime("%d-%m-%y")
+        except ValueError:
+            continue
+    return text
 
 
 def current_user() -> sqlite3.Row | None:
@@ -215,7 +231,7 @@ def has_feature(user: sqlite3.Row | None, feature: str) -> bool:
 
 @app.context_processor
 def inject_globals() -> dict[str, Any]:
-    return {"user": current_user(), "labels": LABELS, "asset_types": ASSET_TYPES, "notification_types": NOTIFICATION_TYPES, "features": FEATURES, "unread_notifications": unread_notifications(), "date_input_value": date_input_value}
+    return {"user": current_user(), "labels": LABELS, "asset_types": ASSET_TYPES, "notification_types": NOTIFICATION_TYPES, "features": FEATURES, "unread_notifications": unread_notifications(), "date_input_value": date_input_value, "display_date": display_date}
 
 
 def login_required(view):
@@ -274,6 +290,28 @@ def parse_upload(file) -> list[dict[str, str]]:
     return rows
 
 
+
+def unique_key_for(table: str) -> str | None:
+    return {"assets": "device_tag", "unprocessed_assets": "device_tag", "employees": "e_code", "unprocessed_employees": "e_code", "software": "software_name", "vendors": "vendor_name"}.get(table)
+
+
+def validate_unique_payload(conn: sqlite3.Connection, table: str, payload: dict[str, str], record_id: int | None = None) -> None:
+    key = unique_key_for(table)
+    if not key:
+        return
+    value = str(payload.get(key, "")).strip()
+    if not value:
+        raise sqlite3.IntegrityError(f"{LABELS.get(key, key)} is mandatory and must be unique")
+    params: list[Any] = [value]
+    sql = f"SELECT id FROM {table} WHERE {key}=?"
+    if table.startswith("unprocessed_"):
+        sql += " AND approval_status='Pending'"
+    if record_id is not None:
+        sql += " AND id!=?"
+        params.append(record_id)
+    if conn.execute(sql, tuple(params)).fetchone():
+        raise sqlite3.IntegrityError(f"Duplicate {LABELS.get(key, key)}: {value}")
+
 def insert_record(table: str, columns: list[str], data: dict[str, str], extra: dict[str, str] | None = None) -> int:
     payload = row_dict(columns, data)
     payload.update(extra or {})
@@ -282,6 +320,7 @@ def insert_record(table: str, columns: list[str], data: dict[str, str], extra: d
     keys = list(payload.keys())
     placeholders = ",".join("?" for _ in keys)
     conn = db()
+    validate_unique_payload(conn, table, payload)
     cur = conn.execute(f"INSERT INTO {table} ({','.join(keys)}) VALUES ({placeholders})", tuple(payload[k] for k in keys))
     conn.commit()
     rid = cur.lastrowid
@@ -294,7 +333,10 @@ def update_record(table: str, columns: list[str], record_id: int, data: dict[str
     payload = row_dict(columns, data)
     payload["updated_at"] = now()
     assignments = ",".join(f"{k}=?" for k in payload)
-    execute(f"UPDATE {table} SET {assignments} WHERE id=?", tuple(payload.values()) + (record_id,))
+    conn = db()
+    validate_unique_payload(conn, table, payload, record_id)
+    conn.execute(f"UPDATE {table} SET {assignments} WHERE id=?", tuple(payload.values()) + (record_id,))
+    conn.commit(); conn.close()
     log_action("update", table, record_id, payload)
 
 
@@ -322,7 +364,7 @@ def approve_software(record_id: int) -> None:
     data = dict(row)
     software = row_dict(SOFTWARE_COLUMNS, data)
     software["purchase_date"] = data.get("installation_date", "")
-    upsert(conn, "software", SOFTWARE_COLUMNS, software, "license_key")
+    upsert(conn, "software", SOFTWARE_COLUMNS, software, "software_name")
     assignment = row_dict(SOFTWARE_ASSIGN_COLUMNS, data)
     upsert(conn, "software_assignments", SOFTWARE_ASSIGN_COLUMNS, assignment, "desktop_laptop_tag", extra_unique="license_key")
     conn.execute("UPDATE software SET used_count=(SELECT COUNT(*) FROM software_assignments WHERE software_assignments.license_key=software.license_key)")
@@ -464,12 +506,12 @@ def dashboard():
 @login_required
 def inventory(kind: str):
     config = {
-        "assets": ("Assets Inventory", "assets", ASSET_COLUMNS, ["Super Admin", "Admin"]),
-        "software": ("Licensed Software", "software", SOFTWARE_COLUMNS, ["Super Admin", "Admin"]),
-        "employees": ("Employee List", "employees", EMPLOYEE_COLUMNS, ["Super Admin", "Admin"]),
-        "unprocessed-assets": ("Unprocessed Assets", "unprocessed_assets", UNPROCESSED_ASSET_COLUMNS, ["Super Admin", "Admin", "Editor"]),
-        "unprocessed-software": ("Unprocessed Software", "unprocessed_software", SOFTWARE_ASSIGN_COLUMNS, ["Super Admin", "Admin", "Editor"]),
-        "unprocessed-employees": ("Unprocessed Employees", "unprocessed_employees", EMPLOYEE_COLUMNS, ["Super Admin", "Admin", "Editor"]),
+        "assets": ("Assets Inventory", "assets", ASSET_COLUMNS, ["Super Admin", "Admin", "Asset Manager"]),
+        "software": ("Licensed Software", "software", SOFTWARE_COLUMNS, ["Super Admin", "Admin", "Asset Manager"]),
+        "employees": ("Employee List", "employees", EMPLOYEE_COLUMNS, ["Super Admin", "Admin", "Asset Manager"]),
+        "unprocessed-assets": ("Unprocessed Assets", "unprocessed_assets", UNPROCESSED_ASSET_COLUMNS, ["Super Admin", "Admin", "Asset Manager", "Editor"]),
+        "unprocessed-software": ("Unprocessed Software", "unprocessed_software", SOFTWARE_ASSIGN_COLUMNS, ["Super Admin", "Admin", "Asset Manager", "Editor"]),
+        "unprocessed-employees": ("Unprocessed Employees", "unprocessed_employees", EMPLOYEE_COLUMNS, ["Super Admin", "Admin", "Asset Manager", "Editor"]),
     }.get(kind)
     if not config:
         return redirect(url_for("dashboard"))
@@ -491,6 +533,11 @@ def inventory(kind: str):
                     payload["license_key"] = key.strip()
                     match = next((s for s in reference_context()["ref_software"] if s.get("license_key") == key.strip()), None)
                     if match:
+                        total = int(match.get("number_of_licenses") or 0)
+                        used = int(match.get("used_count") or 0)
+                        if total and used >= total:
+                            flash(f"No licenses left for {match.get('software_name')}", "warning")
+                            continue
                         payload.update({k: payload.get(k) or match.get(k, "") for k in ("software_name", "version", "license_type", "number_of_licenses", "status")})
                     insert_record("unprocessed_software", SOFTWARE_ASSIGN_COLUMNS, payload, {"maker": user["username"], "approval_status": "Pending", "processed": "0"})
                     saved += 1
@@ -502,11 +549,12 @@ def inventory(kind: str):
             flash(f"Duplicate entry blocked: {exc}", "danger")
         return redirect(url_for("inventory", kind=kind))
     search = request.args.get("q", "").strip()
-    where, params = "1=1", ()
+    where, params = ("approval_status='Pending'", ()) if table.startswith("unprocessed") else ("1=1", ())
     if search:
         like = f"%{search}%"
-        where = " OR ".join(f"{c} LIKE ?" for c in columns)
-        params = tuple([like] * len(columns))
+        search_where = " OR ".join(f"{c} LIKE ?" for c in columns)
+        where = f"({where}) AND ({search_where})"
+        params = params + tuple([like] * len(columns))
     rows = rows_for(table, where=where, params=params)
     return render_template("inventory.html", kind=kind, title=title, table=table, columns=columns, rows=rows, can_write=user["role"] in writers, **reference_context())
 
@@ -540,7 +588,7 @@ def validate_upload(table: str, columns: list[str], records: list[dict[str, str]
 
 @app.route("/inventory/<kind>/upload", methods=["POST"])
 @login_required
-@roles_required("Admin", "Editor")
+@roles_required("Admin", "Asset Manager", "Editor")
 def upload(kind: str):
     maps = {"unprocessed-assets": ("unprocessed_assets", UNPROCESSED_ASSET_COLUMNS), "unprocessed-software": ("unprocessed_software", SOFTWARE_ASSIGN_COLUMNS), "unprocessed-employees": ("unprocessed_employees", EMPLOYEE_COLUMNS)}
     if kind not in maps:
@@ -595,7 +643,7 @@ def edit_record(table: str, record_id: int):
 
 @app.route("/approve/<kind>/<int:record_id>", methods=["POST"])
 @login_required
-@roles_required("Admin")
+@roles_required("Admin", "Asset Manager")
 def approve(kind: str, record_id: int):
     try:
         {"asset": approve_asset, "software": approve_software, "employee": approve_employee}[kind](record_id)
@@ -609,7 +657,7 @@ def approve(kind: str, record_id: int):
 
 @app.route("/reject/<table>/<int:record_id>", methods=["POST"])
 @login_required
-@roles_required("Admin")
+@roles_required("Admin", "Asset Manager")
 def reject(table: str, record_id: int):
     if table not in ("unprocessed_assets", "unprocessed_software", "unprocessed_employees"):
         return redirect(url_for("dashboard"))
@@ -683,7 +731,7 @@ def admin():
                 log_action("create_user", "users", details={"username": request.form["username"], "role": request.form["role"]})
             elif action == "update_user":
                 disabled = 1 if request.form.get("disabled") == "yes" else 0
-                params: list[Any] = [request.form["role"], disabled, "Disabled" if disabled else "Active", json.dumps(request.form.getlist("features"))]
+                params: list[Any] = [request.form["role"], disabled, "Disabled" if disabled else "Active", "[]"]
                 sql = "UPDATE users SET role=?, disabled=?, status=?, features=?"
                 if request.form.get("new_password"):
                     sql += ", password_hash=?"; params.append(generate_password_hash(request.form["new_password"]))
@@ -716,7 +764,7 @@ def sample_csv(kind: str):
 
 @app.route("/delete/<table>/<int:record_id>", methods=["POST"])
 @login_required
-@roles_required("Admin", "Editor")
+@roles_required("Admin", "Asset Manager", "Editor")
 def delete_record(table: str, record_id: int):
     allowed = {"unprocessed_assets", "unprocessed_software", "unprocessed_employees", "vendors"}
     if table not in allowed:
@@ -880,11 +928,13 @@ def vendors():
     if search:
         like = f"%{search}%"; where = " OR ".join(f"{c} LIKE ?" for c in VENDOR_COLUMNS); params = tuple([like] * len(VENDOR_COLUMNS))
     conn = db()
-    rows = conn.execute(f"SELECT * FROM vendors WHERE {where} ORDER BY id DESC", params).fetchall()
+    rows = conn.execute(f"SELECT v.*, (SELECT COUNT(*) FROM assets a WHERE a.supplier_name=v.vendor_name) asset_count, (SELECT COUNT(*) FROM software_assignments s WHERE s.vendor_supplier=v.vendor_name) software_count FROM vendors v WHERE {where} ORDER BY id DESC", params).fetchall()
     assets = conn.execute("SELECT supplier_name, COUNT(*) c FROM assets WHERE supplier_name!='' GROUP BY supplier_name").fetchall()
     software = conn.execute("SELECT vendor_supplier, COUNT(*) c FROM software_assignments WHERE vendor_supplier!='' GROUP BY vendor_supplier").fetchall()
+    vendor_assets = [dict(r) for r in conn.execute("SELECT device_tag, system_name, supplier_name, invoice_number, purchase_year, asset_value FROM assets WHERE supplier_name!='' ORDER BY supplier_name, device_tag").fetchall()]
+    vendor_software = [dict(r) for r in conn.execute("SELECT software_name, license_key, desktop_laptop_tag, employee_name, vendor_supplier, invoice_number, purchase_year, cost FROM software_assignments WHERE vendor_supplier!='' ORDER BY vendor_supplier, software_name").fetchall()]
     conn.close()
-    return render_template("vendors.html", rows=rows, columns=VENDOR_COLUMNS, assets=assets, software=software)
+    return render_template("vendors.html", rows=rows, columns=VENDOR_COLUMNS, assets=assets, software=software, vendor_assets=vendor_assets, vendor_software=vendor_software)
 
 
 def asset_context(ctype: str) -> dict[str, Any]:
@@ -909,7 +959,7 @@ def asset_allotment():
 def asset_allotment_type(ctype: str):
     type_map = {"joining": "Joining", "replacement": "Replacement", "rebuild": "Rebuild", "exit": "Exit", "sysadmin": "Sysadmin", "machine-preparation": "Machine Preparation"}
     checklist_type = type_map.get(ctype, "Joining")
-    if request.method == "POST" and current_user()["role"] in ("Super Admin", "Admin", "Editor", "Sysadmin", "Engineer"):
+    if request.method == "POST" and current_user()["role"] in ("Super Admin", "Admin", "Asset Manager", "Editor"):
         payload = request.form.to_dict(flat=False)
         flat = {k: ", ".join(v) for k, v in payload.items()}
         record = {"checklist_type": checklist_type, "employee_name": request.form.get("employee_name", ""), "e_code": request.form.get("e_code", ""), "vertical": request.form.get("vertical", ""), "sub_vertical": request.form.get("sub_vertical", ""), "rfds": request.form.get("rfds", ""), "payload": json.dumps(flat), "asset_updates": request.form.get("asset_updates", ""), "software_updates": request.form.get("software_updates", ""), "employee_status": request.form.get("employee_status", "Active" if checklist_type != "Exit" else "Exited"), "status": "Pending"}
@@ -962,7 +1012,7 @@ def checklist():
 
 @app.route("/checklist/upload", methods=["POST"])
 @login_required
-@roles_required("Admin", "Editor")
+@roles_required("Admin", "Asset Manager", "Editor")
 def checklist_upload():
     ctype = request.form.get("checklist_type", "Joining")
     records = parse_upload(request.files["file"])
@@ -975,7 +1025,7 @@ def checklist_upload():
 
 @app.route("/checklist/approve/<int:record_id>", methods=["POST"])
 @login_required
-@roles_required("Admin")
+@roles_required("Admin", "Asset Manager")
 def approve_checklist(record_id: int):
     conn = db(); row = conn.execute("SELECT * FROM checklists WHERE id=?", (record_id,)).fetchone()
     if row:
@@ -993,7 +1043,7 @@ def approve_checklist(record_id: int):
 
 @app.route("/checklist/reject/<int:record_id>", methods=["POST"])
 @login_required
-@roles_required("Admin")
+@roles_required("Admin", "Asset Manager")
 def reject_checklist(record_id: int):
     execute("UPDATE checklists SET status='Rejected', checker=?, updated_at=? WHERE id=?", (session["username"], now(), record_id))
     flash("Checklist rejected.", "warning")
@@ -1047,9 +1097,29 @@ def sophos():
     return render_template("sophos.html", machines=machines, pending=pending, requests=requests, section_requests=section_requests, columns=SOPHOS_MACHINE_COLUMNS, request_columns=SOPHOS_REQUEST_COLUMNS, section=section)
 
 
+@app.route("/sophos/machine-action", methods=["POST"])
+@login_required
+@roles_required("Super Admin", "Admin", "Asset Manager", "Editor")
+def sophos_machine_action():
+    action = request.form.get("request_type", "USB Access")
+    hostname = request.form.get("hostname", "").strip()
+    payload = row_dict(SOPHOS_REQUEST_COLUMNS, request.form)
+    payload["request_type"] = action
+    payload["hostname"] = hostname
+    payload["approver"] = request.form.get("approver_1") or request.form.get("approver") or "admin"
+    payload["payload"] = json.dumps(request.form.to_dict())
+    payload["approval_status"] = "Pending"
+    if action in ("USB Access", "DLP Access", "Remote Access"):
+        payload["will_revoke_date"], payload["day_left_for_revoke"] = calculate_revoke(payload.get("apply_date", ""), payload.get("duration", ""))
+    rid = insert_record("sophos_requests", SOPHOS_REQUEST_COLUMNS, payload, {"maker": session["username"]})
+    create_notification(payload["approver"], "Assets Approval", f"Sophos {action} request #{rid} for {hostname} needs approval")
+    flash(f"Sophos {action} submitted for approval.", "success")
+    return redirect(url_for("sophos", section="Unprocessed"))
+
+
 @app.route("/sophos/upload", methods=["POST"])
 @login_required
-@roles_required("Super Admin", "Admin", "Editor", "Sysadmin", "Engineer")
+@roles_required("Super Admin", "Admin", "Asset Manager", "Editor")
 def sophos_upload():
     rtype = request.form.get("request_type", "Machine Preparation")
     records = parse_upload(request.files["file"])
@@ -1064,21 +1134,24 @@ def sophos_upload():
 
 @app.route("/sophos/approve/<int:record_id>", methods=["POST"])
 @login_required
-@roles_required("Super Admin", "Admin", "Approver")
+@roles_required("Super Admin", "Admin", "Asset Manager")
 def approve_sophos(record_id: int):
     conn = db(); row = conn.execute("SELECT * FROM sophos_requests WHERE id=?", (record_id,)).fetchone()
     if row:
-        sync_sophos_machine(conn, dict(row))
+        if row["request_type"] == "Delete":
+            conn.execute("DELETE FROM sophos_machines WHERE hostname=? OR hostname=?", (row["hostname"], row["new_hostname"]))
+        else:
+            sync_sophos_machine(conn, dict(row))
         conn.execute("UPDATE sophos_requests SET approval_status='Approved', checker=?, updated_at=? WHERE id=?", (session["username"], now(), record_id))
         conn.commit()
     conn.close(); log_action("approve_sophos", "sophos_requests", record_id)
     flash("Sophos request approved and machine view updated.", "success")
-    return redirect(url_for("sophos"))
+    return redirect(url_for("sophos", section="Unprocessed"))
 
 
 @app.route("/sophos/reject/<int:record_id>", methods=["POST"])
 @login_required
-@roles_required("Super Admin", "Admin", "Approver")
+@roles_required("Super Admin", "Admin", "Asset Manager")
 def reject_sophos(record_id: int):
     conn = db(); row = conn.execute("SELECT maker FROM sophos_requests WHERE id=?", (record_id,)).fetchone(); conn.close()
     execute("UPDATE sophos_requests SET approval_status='Rejected', checker=?, updated_at=? WHERE id=?", (session["username"], now(), record_id))

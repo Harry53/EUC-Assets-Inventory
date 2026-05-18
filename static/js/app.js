@@ -16,7 +16,7 @@ document.addEventListener('DOMContentLoaded', () => {
     historyText.textContent = btn.dataset.history || 'No details available.';
     modal.classList.add('show');
   }));
-  document.querySelector('.modal-close')?.addEventListener('click', () => modal.classList.remove('show'));
+  document.querySelectorAll('.modal-close').forEach(close => close.addEventListener('click', () => close.closest('.modal')?.classList.remove('show')));
   modal?.addEventListener('click', e => { if (e.target === modal) modal.classList.remove('show'); });
   document.querySelectorAll('.live-search').forEach(input => input.addEventListener('input', () => {
     if (input.value === '' && new URLSearchParams(location.search).has(input.name)) location.href = location.pathname;
@@ -29,7 +29,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const term = input.value.toLowerCase();
     input.parentElement.querySelectorAll('tbody tr').forEach(row => row.style.display = row.textContent.toLowerCase().includes(term) ? '' : 'none');
   }));
-  document.querySelectorAll('.nav a').forEach(a => { if (a.pathname === location.pathname || (location.pathname.startsWith(a.pathname) && a.pathname !== '/')) a.classList.add('active'); });
+  document.querySelectorAll('.nav a').forEach(a => { const target = new URL(a.href, location.origin); if (target.pathname === location.pathname && target.search === location.search) a.classList.add('active'); else if (!target.search && !location.search && target.pathname !== '/' && location.pathname === target.pathname) a.classList.add('active'); });
   document.querySelectorAll('.chart').forEach(canvas => drawChart(canvas));
   document.querySelectorAll('[data-checklist-tab]').forEach(btn => btn.addEventListener('click', e => {
     e.preventDefault();
@@ -124,5 +124,14 @@ document.addEventListener('DOMContentLoaded', () => {
     setNamed(form, 'host_name', asset.system_name || '');
     setNamed(form, 'employee_name', asset.username || '');
     setNamed(form, 'e_code', asset.e_code || '');
+  }));
+});
+document.addEventListener('DOMContentLoaded', () => {
+  const modal = document.getElementById('sophosActionModal');
+  document.querySelectorAll('.sophos-action').forEach(btn => btn.addEventListener('click', () => {
+    document.getElementById('sophosActionType').value = btn.dataset.action || '';
+    document.getElementById('sophosHostname').value = btn.dataset.hostname || '';
+    document.getElementById('sophosPolicy').value = btn.dataset.policy || '';
+    modal?.classList.add('show');
   }));
 });

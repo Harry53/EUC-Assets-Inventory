@@ -113,3 +113,9 @@ body.sidebar-collapsed .content{margin-left:82px}
 .title-block{text-align:left;margin-right:auto}.topbar{justify-content:flex-start}.top-actions{margin-left:auto}
 table{font-size:12px}th{font-size:11px}td{font-size:12px}.btn-sm,td button,td .danger-btn{font-size:11px;padding:5px 8px;border-radius:8px}.card{text-decoration:none;color:var(--text)}.chips a{background:rgba(127,151,180,.11);border:1px solid var(--line);padding:10px 13px;border-radius:15px;color:var(--text);text-decoration:none}.forgot{display:block;margin-top:12px;color:var(--brand)}.compact-checks{grid-template-columns:repeat(2,minmax(120px,1fr));font-size:11px}.content{transition:margin-left .2s}.sidebar{transition:width .2s,transform .25s}
 @media(max-width:760px){body.sidebar-collapsed .content{margin-left:0}body.sidebar-collapsed .sidebar{width:292px}}
+
+/* Enterprise workflow refinements */
+.notification-panel{max-height:72vh;overflow-y:auto;scrollbar-width:thin}
+.icon-link{background:transparent;border:1px solid var(--line);color:var(--brand);padding:5px 8px;border-radius:9px;text-decoration:none;display:inline-flex;align-items:center;justify-content:center;gap:4px;min-width:30px;box-shadow:none}
+.icon-link:hover,.chip-btn:hover{background:rgba(47,195,255,.14);transform:translateY(-1px)}
+.action-icons{display:flex;gap:5px;align-items:center;white-space:nowrap}.action-icons form{display:inline-flex}.chip-btn{background:rgba(127,151,180,.11);border:1px solid var(--line);padding:10px 13px;border-radius:15px;color:var(--text);font-weight:700}.chip-btn b{color:var(--warn);margin-left:8px}.data-table tbody tr:hover td{box-shadow:inset 0 0 0 9999px rgba(47,195,255,.04)}.modal-card{border-top:4px solid var(--brand);line-height:1.5}.modal-card pre{font-family:"Segoe UI",system-ui,sans-serif}.admin-tabs a.active{background:linear-gradient(135deg,rgba(47,195,255,.24),rgba(56,230,170,.18));color:var(--text);font-weight:800;border-color:rgba(47,195,255,.5)}
