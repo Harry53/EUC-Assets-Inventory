@@ -76,6 +76,7 @@ LABELS = {
     "serial_number": "Serial Number", "ip_address": "IP Address", "device_model": "Device Model", "ram_gb": "RAM GB",
     "storage_type": "Storage Type", "storage_capacity": "Storage Capacity", "action": "Action", "status": "Status",
     "username": "Username", "system_name": "System Name", "previous_user_history": "Previous User History", "purchase_year": "Purchase Year",
+    "purchase_date": "Purchase Date",
     "invoice_number": "Invoice Number", "finance_code": "Finance Code", "supplier_name": "Supplier Name", "asset_value": "Asset Value",
     "warranty_amc": "Warranty/AMC", "eol": "End of Life", "insurance_status": "Insurance Status", "insurance_type": "Insurance Type",
     "e_code": "E-Code", "employee_name": "Employee Name", "doj": "Date of Joining", "vertical": "Vertical",
@@ -358,6 +359,29 @@ def upsert(conn: sqlite3.Connection, table: str, columns: list[str], payload: di
         conn.execute(f"INSERT INTO {table} ({','.join(keys)}) VALUES ({','.join('?' for _ in keys)})", tuple(payload.values()))
 
 
+
+def reference_context() -> dict[str, Any]:
+    conn = db()
+    assets = [dict(r) for r in conn.execute("SELECT * FROM assets ORDER BY device_tag LIMIT 1000").fetchall()]
+    employees = [dict(r) for r in conn.execute("SELECT * FROM employees ORDER BY employee_name LIMIT 1000").fetchall()]
+    software = [dict(r) for r in conn.execute("SELECT * FROM software ORDER BY software_name LIMIT 1000").fetchall()]
+    assignments = [dict(r) for r in conn.execute("SELECT * FROM software_assignments ORDER BY updated_at DESC LIMIT 1000").fetchall()]
+    vendors = [dict(r) for r in conn.execute("SELECT * FROM vendors ORDER BY vendor_name LIMIT 1000").fetchall()]
+    asset_requests = [dict(r) for r in conn.execute("SELECT * FROM unprocessed_assets ORDER BY updated_at DESC LIMIT 1000").fetchall()]
+    conn.close()
+    return {
+        "ref_assets": assets,
+        "ref_employees": employees,
+        "ref_software": software,
+        "ref_assignments": assignments,
+        "ref_vendors": vendors,
+        "asset_history_rows": asset_requests,
+    }
+
+
+def compact_form_data(form) -> dict[str, str]:
+    return {k: v for k, v in form.to_dict().items() if not k.startswith("enable_") and k != "form_type" and str(v).strip()}
+
 def rows_for(table: str, order: str = "id DESC", limit: int | None = None, where: str = "1=1", params: tuple[Any, ...] = ()) -> list[sqlite3.Row]:
     conn = db()
     sql = f"SELECT * FROM {table} WHERE {where} ORDER BY {order}"
@@ -456,8 +480,24 @@ def inventory(kind: str):
         if table.startswith("unprocessed"):
             extra = {"maker": user["username"], "approval_status": "Pending", "processed": "0"}
         try:
-            rid = insert_record(table, columns, request.form, extra)
-            flash(f"Saved record #{rid}.", "success")
+            if kind == "software" and request.form.get("form_type") == "software_allocation":
+                selected_keys = request.form.getlist("license_keys") or [request.form.get("license_key", "")]
+                saved = 0
+                base = compact_form_data(request.form)
+                for key in selected_keys:
+                    if not key.strip():
+                        continue
+                    payload = dict(base)
+                    payload["license_key"] = key.strip()
+                    match = next((s for s in reference_context()["ref_software"] if s.get("license_key") == key.strip()), None)
+                    if match:
+                        payload.update({k: payload.get(k) or match.get(k, "") for k in ("software_name", "version", "license_type", "number_of_licenses", "status")})
+                    insert_record("unprocessed_software", SOFTWARE_ASSIGN_COLUMNS, payload, {"maker": user["username"], "approval_status": "Pending", "processed": "0"})
+                    saved += 1
+                flash(f"Submitted {saved} software allocation request(s) for approval.", "success")
+            else:
+                rid = insert_record(table, columns, compact_form_data(request.form), extra)
+                flash(f"Saved record #{rid}.", "success")
         except sqlite3.IntegrityError as exc:
             flash(f"Duplicate entry blocked: {exc}", "danger")
         return redirect(url_for("inventory", kind=kind))
@@ -468,7 +508,7 @@ def inventory(kind: str):
         where = " OR ".join(f"{c} LIKE ?" for c in columns)
         params = tuple([like] * len(columns))
     rows = rows_for(table, where=where, params=params)
-    return render_template("inventory.html", kind=kind, title=title, table=table, columns=columns, rows=rows, can_write=user["role"] in writers)
+    return render_template("inventory.html", kind=kind, title=title, table=table, columns=columns, rows=rows, can_write=user["role"] in writers, **reference_context())
 
 
 def validate_upload(table: str, columns: list[str], records: list[dict[str, str]]) -> list[str]:
@@ -550,7 +590,7 @@ def edit_record(table: str, record_id: int):
             flash("Record updated.", "success")
         except sqlite3.IntegrityError as exc:
             flash(f"Duplicate entry blocked: {exc}", "danger")
-    return render_template("edit.html", table=table, row=row, columns=columns, back_url=request.referrer or url_for("dashboard"))
+    return render_template("edit.html", table=table, row=row, columns=columns, back_url=request.referrer or url_for("dashboard"), **reference_context())
 
 
 @app.route("/approve/<kind>/<int:record_id>", methods=["POST"])
@@ -915,8 +955,9 @@ def checklist():
     pending = conn.execute("SELECT * FROM checklists WHERE status='Pending' ORDER BY id DESC LIMIT 200").fetchall()
     processed = conn.execute("SELECT * FROM checklists WHERE status='Approved' ORDER BY id DESC LIMIT 200").fetchall()
     employees = conn.execute("SELECT e_code, employee_name, vertical, sub_vertical, rfds FROM employees ORDER BY employee_name LIMIT 500").fetchall()
+    assets = conn.execute("SELECT * FROM assets ORDER BY device_tag LIMIT 500").fetchall()
     conn.close()
-    return render_template("checklist.html", pending=pending, processed=processed, employees=employees)
+    return render_template("checklist.html", pending=pending, processed=processed, employees=employees, assets=assets)
 
 
 @app.route("/checklist/upload", methods=["POST"])
@@ -1001,8 +1042,9 @@ def sophos():
     machines = conn.execute("SELECT * FROM sophos_machines ORDER BY updated_at DESC LIMIT 500").fetchall()
     pending = conn.execute("SELECT * FROM sophos_requests WHERE approval_status='Pending' ORDER BY id DESC LIMIT 300").fetchall()
     requests = conn.execute("SELECT * FROM sophos_requests ORDER BY id DESC LIMIT 500").fetchall()
+    section_requests = requests if section in ("machines", "Unprocessed") else [r for r in requests if r["request_type"] == section]
     conn.close()
-    return render_template("sophos.html", machines=machines, pending=pending, requests=requests, columns=SOPHOS_MACHINE_COLUMNS, request_columns=SOPHOS_REQUEST_COLUMNS, section=section)
+    return render_template("sophos.html", machines=machines, pending=pending, requests=requests, section_requests=section_requests, columns=SOPHOS_MACHINE_COLUMNS, request_columns=SOPHOS_REQUEST_COLUMNS, section=section)
 
 
 @app.route("/sophos/upload", methods=["POST"])
