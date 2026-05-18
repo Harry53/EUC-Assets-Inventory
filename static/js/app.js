@@ -16,7 +16,7 @@ document.addEventListener('DOMContentLoaded', () => {
     historyText.textContent = btn.dataset.history || 'No details available.';
     modal.classList.add('show');
   }));
-  document.querySelector('.modal-close')?.addEventListener('click', () => modal.classList.remove('show'));
+  document.querySelectorAll('.modal-close').forEach(close => close.addEventListener('click', () => close.closest('.modal')?.classList.remove('show')));
   modal?.addEventListener('click', e => { if (e.target === modal) modal.classList.remove('show'); });
   document.querySelectorAll('.live-search').forEach(input => input.addEventListener('input', () => {
     if (input.value === '' && new URLSearchParams(location.search).has(input.name)) location.href = location.pathname;
@@ -29,7 +29,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const term = input.value.toLowerCase();
     input.parentElement.querySelectorAll('tbody tr').forEach(row => row.style.display = row.textContent.toLowerCase().includes(term) ? '' : 'none');
   }));
-  document.querySelectorAll('.nav a').forEach(a => { if (a.pathname === location.pathname || (location.pathname.startsWith(a.pathname) && a.pathname !== '/')) a.classList.add('active'); });
+  document.querySelectorAll('.nav a').forEach(a => { const target = new URL(a.href, location.origin); if (target.pathname === location.pathname && target.search === location.search) a.classList.add('active'); else if (!target.search && !location.search && target.pathname !== '/' && location.pathname === target.pathname) a.classList.add('active'); });
   document.querySelectorAll('.chart').forEach(canvas => drawChart(canvas));
   document.querySelectorAll('[data-checklist-tab]').forEach(btn => btn.addEventListener('click', e => {
     e.preventDefault();
@@ -57,3 +57,81 @@ function drawChart(canvas) {
     ctx.fillStyle = getComputedStyle(document.documentElement).getPropertyValue('--muted'); ctx.fillText(label.slice(0,12), x, h - 14 * devicePixelRatio);
   });
 }
+
+function parseJsonScript(id) {
+  try { return JSON.parse(document.getElementById(id)?.textContent || '[]'); } catch { return []; }
+}
+function setNamed(form, name, value) {
+  form.querySelectorAll(`[name="${CSS.escape(name)}"]`).forEach(el => {
+    if (el.disabled && !name.endsWith('_display')) return;
+    el.value = value || '';
+  });
+}
+function buildHistoryTable(tag) {
+  const rows = parseJsonScript('assetHistoryData').filter(r => r.device_tag === tag);
+  const body = document.querySelector('#assetHistoryTable tbody');
+  if (!body) return;
+  body.innerHTML = rows.length ? rows.map(r => `<tr><td>${r.device_tag || ''}</td><td>${r.employee_name || r.username || ''}</td><td>${r.e_code || ''}</td><td>${r.action || ''}</td><td>${r.status || r.approval_status || ''}</td><td>${r.updated_at || r.created_at || ''}</td></tr>`).join('') : '<tr><td colspan="6">Empty</td></tr>';
+}
+function buildAllocatedSoftware(tag) {
+  const rows = parseJsonScript('assignmentData').filter(r => r.desktop_laptop_tag === tag);
+  const box = document.getElementById('allocatedSoftware');
+  if (!box) return;
+  box.innerHTML = rows.length ? `<div class="table-wrap small"><table><thead><tr><th>Software</th><th>Version</th><th>License</th><th>Status</th></tr></thead><tbody>${rows.map(r => `<tr><td>${r.software_name || ''}</td><td>${r.version || ''}</td><td>${r.license_key || ''}</td><td>${r.status || ''}</td></tr>`).join('')}</tbody></table></div>` : 'No software allocated.';
+}
+document.addEventListener('DOMContentLoaded', () => {
+  const assets = parseJsonScript('assetData'), employees = parseJsonScript('employeeData'), vendors = parseJsonScript('vendorData');
+  document.querySelectorAll('[data-autofill-asset]').forEach(input => input.addEventListener('change', () => {
+    const form = input.closest('form');
+    const asset = assets.find(a => a.device_tag === input.value || a.serial_number === input.value || a.system_name === input.value);
+    if (!asset || !form) return;
+    Object.entries(asset).forEach(([k, v]) => setNamed(form, k, v));
+    setNamed(form, 'desktop_laptop_tag', asset.device_tag || '');
+    setNamed(form, 'desktop_laptop_tag_display', asset.device_tag || '');
+    const emp = employees.find(e => e.e_code === asset.e_code || e.employee_name === asset.username);
+    if (emp) Object.entries(emp).forEach(([k, v]) => setNamed(form, k, v));
+    buildHistoryTable(asset.device_tag);
+    buildAllocatedSoftware(asset.device_tag);
+  }));
+  document.querySelectorAll('[data-autofill-employee]').forEach(input => input.addEventListener('change', () => {
+    const form = input.closest('form');
+    const emp = employees.find(e => e.e_code === input.value || e.employee_name === input.value);
+    if (!emp || !form) return;
+    Object.entries(emp).forEach(([k, v]) => setNamed(form, k, v));
+    setNamed(form, 'username', emp.employee_name || '');
+  }));
+  document.querySelectorAll('[data-autofill-vendor]').forEach(input => input.addEventListener('change', () => {
+    const form = input.closest('form');
+    const vendor = vendors.find(v => v.vendor_name === input.value || v.contact_person === input.value);
+    if (!vendor || !form) return;
+    setNamed(form, 'supplier_name', vendor.vendor_name || '');
+  }));
+  document.querySelectorAll('fieldset legend input[type="checkbox"]').forEach(cb => cb.addEventListener('change', () => {
+    cb.closest('fieldset').querySelectorAll('input, select, textarea').forEach(el => { if (el !== cb) el.disabled = !cb.checked; });
+  }));
+});
+document.addEventListener('DOMContentLoaded', () => {
+  const assets = parseJsonScript('assetData').concat(Array.from(document.querySelectorAll('#assetList option')).map(o => ({device_tag: o.value})));
+  document.querySelectorAll('[data-checklist-asset]').forEach(input => input.addEventListener('change', () => {
+    const allAssets = parseJsonScript('assetData');
+    const asset = allAssets.find(a => a.device_tag === input.value || a.serial_number === input.value || a.system_name === input.value);
+    const form = input.closest('form');
+    if (!asset || !form) return;
+    setNamed(form, 'machine_asset_tag', asset.device_tag || '');
+    setNamed(form, 'system_serial_number', asset.serial_number || '');
+    setNamed(form, 'model', asset.device_model || '');
+    setNamed(form, 'ip_address', asset.ip_address || '');
+    setNamed(form, 'host_name', asset.system_name || '');
+    setNamed(form, 'employee_name', asset.username || '');
+    setNamed(form, 'e_code', asset.e_code || '');
+  }));
+});
+document.addEventListener('DOMContentLoaded', () => {
+  const modal = document.getElementById('sophosActionModal');
+  document.querySelectorAll('.sophos-action').forEach(btn => btn.addEventListener('click', () => {
+    document.getElementById('sophosActionType').value = btn.dataset.action || '';
+    document.getElementById('sophosHostname').value = btn.dataset.hostname || '';
+    document.getElementById('sophosPolicy').value = btn.dataset.policy || '';
+    modal?.classList.add('show');
+  }));
+});
